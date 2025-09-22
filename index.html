@@ -66,7 +66,22 @@
     <script type="module">
         // --- CONFIGURAÇÕES ---
         const ARTICLES_TO_GENERATE = 3;
-        const apiKey = ""; // A chave da API será fornecida pelo ambiente, deixe em branco.
+        // IMPORTANTE: Substitua pela sua chave da API do Google AI Studio. Siga o arquivo INSTRUCOES.md.
+        const apiKey = "curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent" \
+  -H 'Content-Type: application/json' \
+  -H 'X-goog-api-key: GEMINI_API_KEY' \
+  -X POST \
+  -d '{
+    "contents": [
+      {
+        "parts": [
+          {
+            "text": "Explain how AI works in a few words"
+          }
+        ]
+      }
+    ]
+  }'"; 
 
         // --- ELEMENTOS DO DOM ---
         const articlesContainer = document.getElementById('articles-container');
@@ -219,6 +234,11 @@
          * Ponto de entrada. Verifica o armazenamento local e decide se gera novos artigos.
          */
         async function main() {
+            if (apiKey === "COLE_SUA_API_KEY_AQUI") {
+                loadingIndicator.innerHTML = '<p class="text-red-500 font-bold text-center">CONFIGURAÇÃO NECESSÁRIA:<br>Por favor, adicione sua Chave de API da Google AI no arquivo index.html.<br>Siga as instruções no arquivo INSTRUCOES.md.</p>';
+                return;
+            }
+
             const today = new Date().toISOString().split('T')[0]; // Formato AAAA-MM-DD
             const storedArticlesData = JSON.parse(localStorage.getItem('dailyNews'));
 
@@ -238,6 +258,10 @@
                         const content = await generateArticleContent(existingTitles);
                         if (content) {
                             articlesContent.push(content);
+                        } else {
+                            // Se um artigo falhar, pare de tentar para não gastar recursos
+                            console.error(`Falha ao gerar conteúdo para o artigo ${i + 1}. Parando.`);
+                            break; 
                         }
                     }
                     

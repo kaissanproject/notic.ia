@@ -2,69 +2,63 @@ import os
 import requests
 import base64
 import time
+import json
 
 # --- CONFIGURAÇÃO ---
-# A chave agora é lida de um "segredo" do GitHub, de uma conta da Hugging Face.
 HUGGINGFACE_API_TOKEN = os.getenv('HUGGINGFACE_API_TOKEN')
 
-# Modelos que vamos usar da plataforma Hugging Face
-TEXT_MODEL_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1"
+# Modelos ATUALIZADOS e mais estáveis da plataforma Hugging Face
+# Usaremos um modelo mais robusto e de propósito geral para texto.
+TEXT_MODEL_API_URL = "https://api-inference.huggingface.co/models/google/gemma-1.1-7b-it" 
 IMAGE_MODEL_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
 
 ARTICLES_TO_GENERATE = 3
 OUTPUT_FILENAME = "index.html"
 TEMPLATE_FILENAME = "template.html"
 
-# Cabeçalho de autenticação para as requisições
 HEADERS = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
 
-# Validação da Chave de API
 if not HUGGINGFACE_API_TOKEN:
-    print("ERRO CRÍTICO: O token da API Hugging Face não foi encontrado. Verifique os segredos do repositório.")
+    print("ERRO CRÍTICO: O token da API Hugging Face não foi encontrado.")
     exit(1)
 
 # --- FUNÇÕES DE GERAÇÃO ---
 
-def query_api(api_url, payload, retries=3, initial_wait=10):
+def query_api(api_url, payload, retries=3, initial_wait=20):
     """Função genérica para fazer requisições à API da Hugging Face com retentativas."""
     for i in range(retries):
         response = requests.post(api_url, headers=HEADERS, json=payload)
         
-        # Se a resposta for OK, retorna o resultado
         if response.status_code == 200:
             return response
         
-        # Se o modelo estiver carregando, espera e tenta novamente
-        elif response.status_code == 503:
+        elif response.status_code == 503: # Modelo carregando
             wait_time = response.json().get('estimated_time', initial_wait)
-            print(f"Modelo está carregando. Esperando {wait_time:.2f} segundos para tentar novamente...")
+            print(f"Modelo está carregando. Esperando {wait_time:.2f} segundos...")
             time.sleep(wait_time)
-        # Outros erros
         else:
             print(f"API retornou erro {response.status_code}: {response.text}")
             print(f"Tentativa {i + 1} de {retries}. Esperando {initial_wait}s...")
             time.sleep(initial_wait)
             
-    print(f"API falhou após {retries} tentativas.")
+    print(f"API falhou após {retries} tentativas no endpoint: {api_url}")
     return None
 
 def get_trending_topics():
     """Busca tópicos em alta no Brasil usando o modelo de texto."""
     print("Buscando tópicos em alta...")
-    prompt = f"Liste {ARTICLES_TO_GENERATE + 2} tópicos de notícias muito populares no Brasil neste momento. Retorne apenas os nomes dos tópicos, separados por ponto e vírgula. Exemplo: Reforma tributária;Novidades do futebol brasileiro;Lançamentos de tecnologia no Brasil"
+    prompt = f"Liste {ARTICLES_TO_GENERATE + 2} tópicos de notícias muito populares no Brasil hoje. Retorne apenas os nomes dos tópicos, separados por ponto e vírgula. Exemplo: Reforma tributária;Novidades do futebol brasileiro;Lançamentos de tecnologia no Brasil"
     
-    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt})
+    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 100}})
     
     if response:
         try:
-            # A resposta da Hugging Face vem dentro de uma lista
             text_result = response.json()[0]['generated_text']
-            # Remove o prompt da resposta para obter apenas os tópicos
             clean_text = text_result.replace(prompt, "").strip()
             topics = [topic.strip() for topic in clean_text.split(';') if topic.strip()]
             print(f"Tópicos encontrados: {topics}")
-            return topics
-        except (KeyError, IndexError, Exception) as e:
+            return topics if topics else None
+        except (KeyError, IndexError, json.JSONDecodeError, Exception) as e:
             print(f"Erro ao processar a resposta dos tópicos: {e}")
             return None
     return None
@@ -76,13 +70,13 @@ def generate_article_content(topic):
     Sua tarefa é escrever um artigo completo sobre o tópico: "{topic}".
     Você é um jornalista digital brasileiro, com um tom descontraído e envolvente.
     O artigo deve conter um título de notícia chamativo, o conteúdo com 3 parágrafos, e uma meta description para SEO com no máximo 150 caracteres.
-    Retorne o resultado estritamente no seguinte formato:
+    Retorne o resultado estritamente no seguinte formato, sem nenhum texto adicional antes ou depois:
     TITULO: [Seu título aqui]
-    CONTEUDO: [Seu conteúdo aqui, com parágrafos separados por quebra de linha]
+    CONTEUDO: [Seu conteúdo aqui, com parágrafos separados por uma nova linha]
     METADESCRIPTION: [Sua meta description aqui]
     """
     
-    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt})
+    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 500}})
     
     if response:
         try:
@@ -103,9 +97,14 @@ def generate_article_content(topic):
                 elif current_key == "content" and line.strip():
                     content_dict[current_key] += "\n" + line.strip()
 
-            print(f"Artigo '{content_dict.get('title')}' gerado.")
-            return content_dict
-        except (KeyError, IndexError, Exception) as e:
+            if 'title' in content_dict and 'content' in content_dict:
+                print(f"Artigo '{content_dict.get('title')}' gerado.")
+                return content_dict
+            else:
+                print(f"Resposta da IA mal formatada: {text_result}")
+                return None
+
+        except (KeyError, IndexError, json.JSONDecodeError, Exception) as e:
             print(f"Erro ao processar o conteúdo do artigo: {e}")
             return None
     return None
@@ -118,7 +117,6 @@ def generate_article_image(prompt):
     response = query_api(IMAGE_MODEL_API_URL, {"inputs": full_prompt})
     
     if response:
-        # A API de imagem retorna os bytes da imagem diretamente
         image_bytes = response.content
         b64_image = base64.b64encode(image_bytes).decode('utf-8')
         return f"data:image/png;base64,{b64_image}"
@@ -137,8 +135,7 @@ def main():
     articles_data = []
     for topic in topics[:ARTICLES_TO_GENERATE]:
         content = generate_article_content(topic)
-        if content and 'title' in content:
-            # Pausa para não sobrecarregar a API de imagens
+        if content:
             time.sleep(5) 
             image_url = generate_article_image(content['title'])
             content['image_url'] = image_url

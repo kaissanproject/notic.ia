@@ -4,11 +4,11 @@ import base64
 import time
 import json
 
-# --- CONFIGURAÇÃO FINAL ---
+# --- CONFIGURAÇÃO FINAL E ESTÁVEL ---
 HUGGINGFACE_API_TOKEN = os.getenv('HUGGINGFACE_API_TOKEN')
 
-# MODELOS FINAIS - NÃO EXIGEM AUTORIZAÇÃO
-TEXT_MODEL_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+# MODELO FINAL - UM DOS MAIS ESTÁVEIS E CONHECIDOS DA PLATAFORMA. NÃO EXIGE AUTORIZAÇÃO.
+TEXT_MODEL_API_URL = "https://api-inference.huggingface.co/models/OpenAssistant/oasst-sft-4-pythia-12b-epoch-3.5"
 IMAGE_MODEL_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
 
 ARTICLES_TO_GENERATE = 3
@@ -50,7 +50,7 @@ def query_api(api_url, payload, retries=3, initial_wait=20):
 def get_trending_topics():
     """Busca tópicos em alta no Brasil usando o modelo de texto."""
     print("Buscando tópicos em alta...")
-    prompt = f"Liste {ARTICLES_TO_GENERATE + 2} tópicos de notícias muito populares no Brasil hoje. Retorne apenas os nomes dos tópicos, separados por ponto e vírgula. Exemplo: Reforma tributária;Novidades do futebol brasileiro;Lançamentos de tecnologia no Brasil"
+    prompt = f"<|prompter|>Liste {ARTICLES_TO_GENERATE + 2} tópicos de notícias muito populares no Brasil hoje. Retorne apenas os nomes dos tópicos, separados por ponto e vírgula. Exemplo: Reforma tributária;Novidades do futebol brasileiro;Lançamentos de tecnologia no Brasil<|endoftext|><|assistant|>"
     
     response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 100, "return_full_text": False}})
     
@@ -68,14 +68,14 @@ def get_trending_topics():
 def generate_article_content(topic):
     """Gera o conteúdo de um artigo para um tópico específico."""
     print(f"Gerando artigo sobre: {topic}...")
-    prompt = f"""
+    prompt = f"""<|prompter|>
     Sua tarefa é escrever um artigo completo sobre o tópico: "{topic}".
     Você é um jornalista digital brasileiro, com um tom descontraído e envolvente.
     O artigo deve conter um título de notícia chamativo, o conteúdo com 3 parágrafos, e uma meta description para SEO com no máximo 150 caracteres.
     Retorne o resultado estritamente no seguinte formato, sem nenhum texto adicional antes ou depois:
     TITULO: [Seu título aqui]
     CONTEUDO: [Seu conteúdo aqui, com parágrafos separados por uma nova linha]
-    METADESCRIPTION: [Sua meta description aqui]
+    METADESCRIPTION: [Sua meta description aqui]<|endoftext|><|assistant|>
     """
     
     response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 500, "return_full_text": False}})

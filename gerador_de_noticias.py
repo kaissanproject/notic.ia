@@ -4,10 +4,13 @@ import base64
 import time
 import json
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO FINAL ---
 HUGGINGFACE_API_TOKEN = os.getenv('HUGGINGFACE_API_TOKEN')
-TEXT_MODEL_API_URL = "https://api-inference.huggingface.co/models/google/gemma-1.1-7b-it" 
+
+# MODELOS FINAIS - NÃO EXIGEM AUTORIZAÇÃO
+TEXT_MODEL_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
 IMAGE_MODEL_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+
 ARTICLES_TO_GENERATE = 3
 OUTPUT_FILENAME = "index.html"
 TEMPLATE_FILENAME = "template.html"
@@ -21,7 +24,7 @@ if not HUGGINGFACE_API_TOKEN:
 # --- FUNÇÕES DE GERAÇÃO ---
 
 def query_api(api_url, payload, retries=3, initial_wait=20):
-    """Função genérica para fazer requisições à API da Hugging Face com retentativas e diagnóstico de erros."""
+    """Função genérica para fazer requisições à API da Hugging Face com retentativas."""
     for i in range(retries):
         response = requests.post(api_url, headers=HEADERS, json=payload)
         
@@ -33,13 +36,10 @@ def query_api(api_url, payload, retries=3, initial_wait=20):
             print(f"Modelo está carregando. Esperando {wait_time:.2f} segundos...")
             time.sleep(wait_time)
         else:
-            # Novo diagnóstico de erro melhorado
-            print(f"API retornou erro {response.status_code}. Resposta completa do servidor:")
+            print(f"API retornou erro {response.status_code}. Resposta do servidor:")
             try:
-                # Tenta imprimir a resposta como JSON se for possível, para ver a mensagem de erro detalhada
                 print(json.dumps(response.json(), indent=2))
             except json.JSONDecodeError:
-                # Se não for JSON, imprime como texto puro
                 print(response.text)
             print(f"Tentativa {i + 1} de {retries}. Esperando {initial_wait}s...")
             time.sleep(initial_wait)
@@ -103,7 +103,7 @@ def generate_article_content(topic):
                 print(f"Artigo '{content_dict.get('title')}' gerado.")
                 return content_dict
             else:
-                print(f"Resposta da IA mal formatada: {text_result}")
+                print(f"Resposta da IA mal formatada, tentando de novo: {text_result}")
                 return None
 
         except (KeyError, IndexError, json.JSONDecodeError, Exception) as e:
@@ -144,7 +144,6 @@ def main():
             articles_data.append(content)
         else:
             print(f"Falha ao gerar conteúdo para o tópico: {topic}")
-
 
     if not articles_data:
         print("Nenhum artigo foi gerado. Encerrando.")

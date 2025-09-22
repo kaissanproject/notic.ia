@@ -49,7 +49,7 @@
         <!-- Indicador de Carregamento -->
         <div id="loading-indicator" class="flex flex-col items-center justify-center py-20">
             <div class="loader"></div>
-            <p class="mt-4 text-lg text-gray-600 font-semibold">Buscando as notícias mais quentes e gerando os artigos...</p>
+            <p id="loading-text" class="mt-4 text-lg text-gray-600 font-semibold">Buscando as notícias mais quentes...</p>
             <p class="text-sm text-gray-500">Isso pode levar um minutinho. O café está quase pronto!</p>
         </div>
 
@@ -71,15 +71,43 @@
         // --- ELEMENTOS DO DOM ---
         const articlesContainer = document.getElementById('articles-container');
         const loadingIndicator = document.getElementById('loading-indicator');
+        const loadingText = document.getElementById('loading-text');
 
         // --- FUNÇÕES DA API GEMINI ---
 
         /**
+         * Realiza uma chamada fetch com lógica de retentativa e exponential backoff.
+         * @param {string} url - A URL da API.
+         * @param {object} options - As opções para a chamada fetch.
+         * @param {number} retries - O número de tentativas.
+         * @returns {Promise<Response>} A resposta da API.
+         */
+        async function fetchWithRetry(url, options, retries = 3) {
+            let delay = 1000; // 1 segundo de espera inicial
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) {
+                        return response;
+                    }
+                    console.warn(`API falhou com status ${response.status}. Tentando novamente em ${delay / 1000}s...`);
+                    const errorBody = await response.text();
+                    console.error("Detalhe do erro:", errorBody);
+                } catch (error) {
+                    console.warn(`Fetch falhou: ${error.message}. Tentando novamente em ${delay / 1000}s...`);
+                }
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Dobra o tempo de espera para a próxima tentativa
+            }
+            throw new Error(`API falhou após ${retries} tentativas.`);
+        }
+
+        /**
          * Gera o conteúdo de um artigo (título, texto, metadescription) usando a API Gemini.
-         * Utiliza a busca do Google para obter informações atuais.
+         * @param {string[]} existingTitles - Títulos de artigos já gerados para evitar repetição.
          * @returns {Promise<Object|null>} Um objeto com {title, content, metaDescription} ou null em caso de erro.
          */
-        async function generateArticleContent() {
+        async function generateArticleContent(existingTitles = []) {
             const systemPrompt = `
                 Você é um jornalista digital brasileiro, especialista em criar conteúdo viral e de fácil leitura.
                 Seu tom é descontraído, informativo e envolvente.
@@ -87,7 +115,7 @@
                 O artigo deve ter um título extremamente chamativo (formato de notícia), uma meta description otimizada para SEO com no máximo 160 caracteres, e o conteúdo do artigo com cerca de 3 a 4 parágrafos.
                 O conteúdo deve explicar o tópico de forma clara e interessante para o público geral.
             `;
-            const userQuery = "Com base nas buscas atuais do Google, escolha um dos tópicos mais quentes no Brasil e escreva um artigo sobre ele. Não repita tópicos de artigos anteriores.";
+            const userQuery = `Com base nas buscas atuais do Google, escolha um dos tópicos mais quentes no Brasil e escreva um artigo sobre ele. Evite os seguintes tópicos que já foram abordados: ${existingTitles.join(', ')}.`;
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
             const payload = {
@@ -109,23 +137,17 @@
             };
 
             try {
-                const response = await fetch(apiUrl, {
+                const response = await fetchWithRetry(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
-                if (!response.ok) {
-                    console.error("Erro na API de texto:", response.statusText);
-                    return null;
-                }
-
                 const result = await response.json();
                 const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
                 return text ? JSON.parse(text) : null;
-
             } catch (error) {
-                console.error("Falha ao gerar conteúdo do artigo:", error);
+                console.error("Falha ao gerar conteúdo do artigo após múltiplas tentativas:", error);
                 return null;
             }
         }
@@ -144,25 +166,19 @@
             };
 
             try {
-                const response = await fetch(apiUrl, {
+                const response = await fetchWithRetry(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 
-                if (!response.ok) {
-                    console.error("Erro na API de imagem:", response.statusText);
-                    return defaultImage;
-                }
-
                 const result = await response.json();
                 if (result.predictions && result.predictions[0]?.bytesBase64Encoded) {
                     return `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
                 }
                 return defaultImage;
-
             } catch (error) {
-                console.error("Falha ao gerar imagem do artigo:", error);
+                console.error("Falha ao gerar imagem do artigo após múltiplas tentativas:", error);
                 return defaultImage;
             }
         }
@@ -214,20 +230,27 @@
                 loadingIndicator.style.display = 'flex';
                 
                 try {
-                    // Gera o conteúdo de todos os artigos em paralelo
-                    const contentPromises = Array(ARTICLES_TO_GENERATE).fill(null).map(() => generateArticleContent());
-                    const articlesContent = await Promise.all(contentPromises);
+                    const articlesContent = [];
+                    // Gera o conteúdo dos artigos sequencialmente para evitar sobrecarga na API
+                    for (let i = 0; i < ARTICLES_TO_GENERATE; i++) {
+                        loadingText.textContent = `Gerando artigo ${i + 1} de ${ARTICLES_TO_GENERATE}...`;
+                        const existingTitles = articlesContent.map(a => a.title);
+                        const content = await generateArticleContent(existingTitles);
+                        if (content) {
+                            articlesContent.push(content);
+                        }
+                    }
                     
-                    const validArticlesContent = articlesContent.filter(Boolean);
-                    
-                    if (validArticlesContent.length === 0) {
+                    if (articlesContent.length === 0) {
                          loadingIndicator.innerHTML = '<p class="text-red-500 font-bold">Oops! Não foi possível gerar as notícias hoje. Tente novamente mais tarde.</p>';
                          return;
                     }
 
+                    loadingText.textContent = 'Criando imagens para os artigos...';
+
                     // Gera as imagens para os artigos que tiveram conteúdo gerado
                     const finalArticles = await Promise.all(
-                        validArticlesContent.map(async (content) => {
+                        articlesContent.map(async (content) => {
                             const imageUrl = await generateArticleImage(content.title);
                             return { ...content, imageUrl };
                         })
@@ -256,3 +279,4 @@
 
 </body>
 </html>
+

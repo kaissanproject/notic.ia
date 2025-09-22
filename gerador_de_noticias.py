@@ -6,12 +6,8 @@ import json
 
 # --- CONFIGURAÇÃO ---
 HUGGINGFACE_API_TOKEN = os.getenv('HUGGINGFACE_API_TOKEN')
-
-# Modelos ATUALIZADOS e mais estáveis da plataforma Hugging Face
-# Usaremos um modelo mais robusto e de propósito geral para texto.
 TEXT_MODEL_API_URL = "https://api-inference.huggingface.co/models/google/gemma-1.1-7b-it" 
 IMAGE_MODEL_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-
 ARTICLES_TO_GENERATE = 3
 OUTPUT_FILENAME = "index.html"
 TEMPLATE_FILENAME = "template.html"
@@ -25,7 +21,7 @@ if not HUGGINGFACE_API_TOKEN:
 # --- FUNÇÕES DE GERAÇÃO ---
 
 def query_api(api_url, payload, retries=3, initial_wait=20):
-    """Função genérica para fazer requisições à API da Hugging Face com retentativas."""
+    """Função genérica para fazer requisições à API da Hugging Face com retentativas e diagnóstico de erros."""
     for i in range(retries):
         response = requests.post(api_url, headers=HEADERS, json=payload)
         
@@ -37,7 +33,14 @@ def query_api(api_url, payload, retries=3, initial_wait=20):
             print(f"Modelo está carregando. Esperando {wait_time:.2f} segundos...")
             time.sleep(wait_time)
         else:
-            print(f"API retornou erro {response.status_code}: {response.text}")
+            # Novo diagnóstico de erro melhorado
+            print(f"API retornou erro {response.status_code}. Resposta completa do servidor:")
+            try:
+                # Tenta imprimir a resposta como JSON se for possível, para ver a mensagem de erro detalhada
+                print(json.dumps(response.json(), indent=2))
+            except json.JSONDecodeError:
+                # Se não for JSON, imprime como texto puro
+                print(response.text)
             print(f"Tentativa {i + 1} de {retries}. Esperando {initial_wait}s...")
             time.sleep(initial_wait)
             
@@ -49,13 +52,12 @@ def get_trending_topics():
     print("Buscando tópicos em alta...")
     prompt = f"Liste {ARTICLES_TO_GENERATE + 2} tópicos de notícias muito populares no Brasil hoje. Retorne apenas os nomes dos tópicos, separados por ponto e vírgula. Exemplo: Reforma tributária;Novidades do futebol brasileiro;Lançamentos de tecnologia no Brasil"
     
-    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 100}})
+    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 100, "return_full_text": False}})
     
     if response:
         try:
             text_result = response.json()[0]['generated_text']
-            clean_text = text_result.replace(prompt, "").strip()
-            topics = [topic.strip() for topic in clean_text.split(';') if topic.strip()]
+            topics = [topic.strip() for topic in text_result.split(';') if topic.strip()]
             print(f"Tópicos encontrados: {topics}")
             return topics if topics else None
         except (KeyError, IndexError, json.JSONDecodeError, Exception) as e:
@@ -76,11 +78,11 @@ def generate_article_content(topic):
     METADESCRIPTION: [Sua meta description aqui]
     """
     
-    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 500}})
+    response = query_api(TEXT_MODEL_API_URL, {"inputs": prompt, "parameters": {"max_new_tokens": 500, "return_full_text": False}})
     
     if response:
         try:
-            text_result = response.json()[0]['generated_text'].replace(prompt, "").strip()
+            text_result = response.json()[0]['generated_text'].strip()
             content_dict = {}
             lines = text_result.strip().split('\n')
             current_key = None
@@ -140,6 +142,9 @@ def main():
             image_url = generate_article_image(content['title'])
             content['image_url'] = image_url
             articles_data.append(content)
+        else:
+            print(f"Falha ao gerar conteúdo para o tópico: {topic}")
+
 
     if not articles_data:
         print("Nenhum artigo foi gerado. Encerrando.")

@@ -1,15 +1,13 @@
 name: Gerar Notícias Diárias
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Permite que você inicie a automação manualmente pelo site do GitHub
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 8 * * *' # Roda automaticamente todos os dias às 8:00 UTC (5:00 da manhã no horário de Brasília)
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout do repositório
@@ -30,11 +28,9 @@ jobs:
           HUGGINGFACE_API_TOKEN: ${{ secrets.HUGGINGFACE_API_TOKEN }}
         run: python gerador_de_noticias.py
 
-      - name: Fazer commit do novo site
-        run: |
-          git config --global user.name 'Noticias Bot'
-          git config --global user.email 'action@github.com'
-          git add index.html
-          git diff --staged --quiet || git commit -m "📰 Atualiza notícias do dia"
-          git push
+      - name: Fazer commit do novo site com o Ajudante Especializado
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "📰 Atualiza notícias do dia"
+          file_pattern: index.html # Apenas salva se o arquivo index.html for criado ou modificado
 
